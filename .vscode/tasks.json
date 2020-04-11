@@ -9,7 +9,7 @@
             "command": "cargo",
             "args": [
                 "run",
-                "100e",
+                "\"1(2\"",
             ],
             "problemMatcher": [
                 "$rustc"
