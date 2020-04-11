@@ -97,7 +97,7 @@ fn parse_atom(s: &str) -> (&str, Option<Atom>) {
     let first_non_numeric_index = chars.iter().position(|&c| !c.is_digit(10));
     if let None = first_non_numeric_index {
         return (
-            &"",
+            "",
             Some(Atom {
                 number: parse_number(s),
                 suffix: String::from(""),
@@ -108,15 +108,17 @@ fn parse_atom(s: &str) -> (&str, Option<Atom>) {
     let numeric_part = &s[..first_non_numeric_index.unwrap()];
 
     let first_non_alphanumeric_index = chars.iter().position(|&c| !c.is_alphanumeric());
-    let suffix_part = if let None = first_non_alphanumeric_index {
-        &s[first_non_numeric_index.unwrap()..]
+    let (suffix_part, rest) = if let None = first_non_alphanumeric_index {
+        (&s[first_non_numeric_index.unwrap()..], "")
     } else {
-        &s[first_non_numeric_index.unwrap()..first_non_alphanumeric_index.unwrap()]
+        (
+            &s[first_non_numeric_index.unwrap()..first_non_alphanumeric_index.unwrap()],
+            &s[first_non_alphanumeric_index.unwrap()..],
+        )
     };
 
-    // TODO suffix
     return (
-        &s[first_non_numeric_index.unwrap()..],
+        rest,
         Some(Atom {
             number: parse_number(numeric_part),
             suffix: String::from(suffix_part),
@@ -158,6 +160,8 @@ fn parse(user_input: &str) -> Result<Expr, ParseError> {
                         lhs: Box::new(Expr::Atom(atom)),
                         rhs: Box::new(Expr::Atom(maybe_atom.unwrap())),
                     })
+                } else {
+                    expr = Some(Expr::Atom(atom));
                 }
             }
         }
@@ -172,6 +176,25 @@ fn parse(user_input: &str) -> Result<Expr, ParseError> {
     }
 }
 
+fn eval(expr: &Expr) -> f64 {
+    match expr {
+        Expr::BinOp { op, lhs, rhs } => match op {
+            Op::Plus => eval(lhs) + eval(rhs),
+            Op::Minus => eval(lhs) - eval(rhs),
+            Op::Times => eval(lhs) * eval(rhs),
+            Op::DividedBy => eval(lhs) / eval(rhs),
+        },
+        Expr::Negate { e } => -eval(e),
+        Expr::Atom(a) => match a.suffix.as_str() {
+            "K" => a.number * 1024f64,
+            "k" => a.number * 1000f64,
+            "M" => a.number * 1024f64 * 1024f64,
+            "m" => a.number * 1000f64 * 1000f64,
+            _ => a.number,
+        },
+    }
+}
+
 fn main() {
     let e_string = env::args()
         .skip(1)
@@ -181,6 +204,9 @@ fn main() {
     let expr_result = parse(&e_string);
     match expr_result {
         Err(e) => println!("{:?}", e),
-        Ok(expr) => print_expr(&expr),
+        Ok(expr) => {
+            print_expr(&expr);
+            println!("\n{}", eval(&expr))
+        }
     }
 }
