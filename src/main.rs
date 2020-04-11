@@ -45,10 +45,10 @@ impl fmt::Display for ParseError {
 
 fn print_op(op: &Op) {
     match op {
-        Plus => print!("+"),
-        Minus => print!("-"),
-        Times => print!("*"),
-        DividedBy => print!("/"),
+        Op::Plus => print!("+"),
+        Op::Minus => print!("-"),
+        Op::Times => print!("*"),
+        Op::DividedBy => print!("/"),
     }
 }
 
@@ -59,16 +59,18 @@ fn print_atom(a: &Atom) {
 fn print_expr(e: &Expr) {
     match e {
         Expr::BinOp { op, lhs, rhs } => {
+            print!("(binop ");
             print_expr(lhs.deref());
             print_op(op);
             print_expr(rhs.deref());
+            print!(")");
         }
         Expr::Atom(a) => print_atom(a),
         _ => println!(""),
     }
 }
 
-fn precedence(op: Op) -> i32 {
+fn precedence(op: &Op) -> i32 {
     match op {
         Plus => 0,
         Minus => 0,
@@ -81,28 +83,25 @@ fn parse_number(s: &str) -> f64 {
     return s.parse().unwrap();
 }
 
-fn parse_atom(s: &str) -> (&str, Option<Atom>) {
+fn parse_atom(parser_state: &mut ParserState) -> Result<Atom, ParseError> {
+    let s = parser_state.remaining_input;
     let chars: Vec<char> = s.chars().collect();
 
+    assert!(s.len() > 0);
     // TODO: negative number support
-    if s.len() == 0 {
-        return (s, None);
-    }
 
     // For now only base 10 is supported
     if !chars[0].is_digit(10) {
-        return (s, None);
+        return Err(make_parse_error(parser_state));
     }
 
     let first_non_numeric_index = chars.iter().position(|&c| !c.is_digit(10));
     if let None = first_non_numeric_index {
-        return (
-            "",
-            Some(Atom {
-                number: parse_number(s),
-                suffix: String::from(""),
-            }),
-        );
+        parser_state.remaining_input = "";
+        return Ok(Atom {
+            number: parse_number(s),
+            suffix: String::from(""),
+        });
     }
 
     let numeric_part = &s[..first_non_numeric_index.unwrap()];
@@ -117,62 +116,102 @@ fn parse_atom(s: &str) -> (&str, Option<Atom>) {
         )
     };
 
-    return (
-        rest,
-        Some(Atom {
-            number: parse_number(numeric_part),
-            suffix: String::from(suffix_part),
-        }),
-    );
+    parser_state.remaining_input = rest;
+    return Ok(Atom {
+        number: parse_number(numeric_part),
+        suffix: String::from(suffix_part),
+    });
 }
 
-fn parse_binop(s: &str) -> (&str, Option<Op>) {
-    match s.chars().nth(0) {
-        Some('+') => (&s[1..], Some(Op::Plus)),
-        Some('-') => (&s[1..], Some(Op::Minus)),
-        Some('*') => (&s[1..], Some(Op::Times)),
-        Some('/') => (&s[1..], Some(Op::DividedBy)),
-        _ => (s, None),
+fn is_binop(c: char) -> bool {
+    "+-*/".contains(c)
+}
+
+struct ParserState<'a> {
+    current_precedence: i32,
+    character_index: usize,
+    remaining_input: &'a str,
+}
+
+fn parse_binop_rhs(parser_state: &mut ParserState, lhs: Expr) -> Result<Expr, ParseError> {
+    assert!(parser_state.remaining_input.len() > 0);
+
+    let mut new_lhs = lhs;
+    loop {
+        let maybe_next_character = parser_state.remaining_input.chars().nth(0);
+        if maybe_next_character.is_none() {
+            return Ok(new_lhs);
+        }
+
+        let next_character = maybe_next_character.unwrap();
+        let maybe_op = match next_character {
+            '+' => Some(Op::Plus),
+            '-' => Some(Op::Minus),
+            '*' => Some(Op::Times),
+            '/' => Some(Op::DividedBy),
+            _ => None,
+        };
+        if maybe_op.is_none() {
+            // No more operators to parse, we're done
+            return Ok(new_lhs);
+        }
+
+        let op = maybe_op.unwrap();
+        let op_precedence = precedence(&op);
+
+        parser_state.remaining_input = &parser_state.remaining_input[1..];
+
+        let next_primary_expr = parse_primary(parser_state)?;
+        let rhs = if op_precedence > parser_state.current_precedence {
+            if parser_state.remaining_input.len() > 0
+                && is_binop(parser_state.remaining_input.chars().nth(0).unwrap())
+            {
+                // RHS will be the result of the rest of the parse
+                parse_binop_rhs(parser_state, next_primary_expr)?
+            } else {
+                next_primary_expr
+            }
+        } else {
+            next_primary_expr
+        };
+
+        new_lhs = Expr::BinOp {
+            op: op,
+            lhs: Box::new(new_lhs),
+            rhs: Box::new(rhs),
+        };
     }
 }
 
-fn parse(user_input: &str) -> Result<Expr, ParseError> {
-    let mut p = -1;
+fn make_parse_error(parser_state: &ParserState) -> ParseError {
+    ParseError {
+        character_index: parser_state.character_index,
+        context: String::from(parser_state.remaining_input),
+    }
+}
 
-    let mut s: &str = user_input;
-    let mut expr: Option<Expr> = None;
+fn parse_primary(parser_state: &mut ParserState) -> Result<Expr, ParseError> {
+    // Base case: We parse the rhs of a binary or unary operation
+    // Recursive case: We need to parse the rhs of a binary operation
 
-    while s.len() > 0 {
-        let (next_s, maybe_atom) = parse_atom(s);
-        s = next_s;
-        match maybe_atom {
-            None => panic!("Expected atom"),
-            Some(atom) => {
-                // See if this is part of a binary expression
-                let (next_s, maybe_binop) = parse_binop(next_s);
-                s = next_s;
+    let atom = parse_atom(parser_state)?;
 
-                if let Some(binop) = maybe_binop {
-                    let (next_s, maybe_atom) = parse_atom(s);
-                    s = next_s;
-                    expr = Some(Expr::BinOp {
-                        op: binop,
-                        lhs: Box::new(Expr::Atom(atom)),
-                        rhs: Box::new(Expr::Atom(maybe_atom.unwrap())),
-                    })
-                } else {
-                    expr = Some(Expr::Atom(atom));
-                }
+    let maybe_next_character = parser_state.remaining_input.chars().nth(0);
+    match maybe_next_character {
+        Some(next_character) => {
+            // "(" => {
+            //     // Parse sub-expression
+            // }
+            // ")" => {
+            //     // Return current expression
+            // }
+            if is_binop(next_character) {
+                parse_binop_rhs(parser_state, Expr::Atom(atom))
+            } else {
+                Err(make_parse_error(parser_state))
             }
         }
-    }
-
-    match expr {
-        None => Err(ParseError {
-            character_index: 0,
-            context: String::from(user_input),
-        }),
-        Some(e) => Ok(e),
+        None => Ok(Expr::Atom(atom)),
     }
 }
 
@@ -201,7 +240,12 @@ fn main() {
         .fold(String::from(""), |s, arg| String::from(s) + &arg)
         .replace(" ", "");
 
-    let expr_result = parse(&e_string);
+    let mut parser_state = ParserState {
+        current_precedence: 0,
+        remaining_input: &e_string,
+        character_index: 0,
+    };
+    let expr_result = parse_primary(&mut parser_state);
     match expr_result {
         Err(e) => println!("{:?}", e),
         Ok(expr) => {
