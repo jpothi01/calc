@@ -9,7 +9,7 @@
             "command": "cargo",
             "args": [
                 "run",
-                "\"(2+2)*2\"",
+                "\"(2+2)*2+(1*9)\"",
             ],
             "problemMatcher": [
                 "$rustc"

@@ -237,11 +237,13 @@ fn make_parse_error(parser_state: &ParserState) -> ParseError {
 }
 
 fn parse_paren_expr(parser_state: &mut ParserState) -> Result<Expr, ParseError> {
+    println!("parse_paren_expr: {:?}", parser_state);
+
     assert!(parser_state.next_character() == Some('('));
     parser_state.consume_character();
     let expr = parse_expr(parser_state)?;
     if parser_state.next_character() != Some(')') {
-        return Err(make_parse_error(parser_state));
+        return Err(make_parse_error_with_msg(parser_state, "Expected ')'"));
     }
 
     parser_state.consume_character();
@@ -275,8 +277,13 @@ fn parse_expr(parser_state: &mut ParserState) -> Result<Expr, ParseError> {
         let next_character = maybe_next_character.unwrap();
         if is_binop(next_character) {
             parse_binop_rhs(parser_state, primary, -1)
+        } else if next_character == ')' {
+            Ok(primary)
         } else {
-            Err(make_parse_error(parser_state))
+            Err(make_parse_error_with_msg(
+                parser_state,
+                "Expected a binary operator or ')'",
+            ))
         }
     } else {
         Ok(primary)
