@@ -136,6 +136,7 @@ fn is_binop(c: char) -> bool {
 struct ParserState<'a> {
     original_input: &'a str,
     remaining_input: &'a str,
+    number_of_open_parens: i32,
 }
 
 impl<'a> ParserState<'a> {
@@ -245,11 +246,13 @@ fn parse_paren_expr(parser_state: &mut ParserState) -> Result<Expr, ParseError> 
 
     assert!(parser_state.next_character() == Some('('));
     parser_state.consume_character();
+    parser_state.number_of_open_parens += 1;
     let expr = parse_expr(parser_state)?;
     if parser_state.next_character() != Some(')') {
         return Err(make_parse_error_with_msg(parser_state, "Expected ')'"));
     }
 
+    parser_state.number_of_open_parens -= 1;
     parser_state.consume_character();
     Ok(expr)
 }
@@ -325,8 +328,19 @@ fn main() {
     let mut parser_state = ParserState {
         original_input: &e_string,
         remaining_input: &e_string,
+        number_of_open_parens: 0,
     };
-    let expr_result = parse_expr(&mut parser_state);
+    let mut expr_result = parse_expr(&mut parser_state);
+    if parser_state.number_of_open_parens != 0 {
+        expr_result = Err(make_parse_error_with_msg(
+            &parser_state,
+            "Unbalanced parens.",
+        ));
+    }
+    if parser_state.remaining_input != "" {
+        expr_result = Err(make_parse_error_with_msg(&parser_state, "Extraneous input"));
+    }
+
     match expr_result {
         Err(e) => {
             let mut terminal = term::stdout().unwrap();
