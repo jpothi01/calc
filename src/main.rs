@@ -6,6 +6,7 @@ use std::env;
 use std::error::Error;
 use std::fmt;
 use std::ops::Deref;
+extern crate term;
 
 enum Op {
     Plus,
@@ -33,7 +34,6 @@ enum Expr {
 
 #[derive(Debug)]
 struct ParseError {
-    character_index: usize,
     context: String,
     message: String,
 }
@@ -97,7 +97,7 @@ fn parse_atom(parser_state: &mut ParserState) -> Result<Atom, ParseError> {
 
     // For now only base 10 is supported
     if !chars[0].is_digit(10) {
-        return Err(make_parse_error(parser_state));
+        return Err(make_parse_error_with_msg(parser_state, "Expected number."));
     }
 
     let first_non_numeric_index = chars.iter().position(|&c| !c.is_digit(10));
@@ -134,7 +134,7 @@ fn is_binop(c: char) -> bool {
 
 #[derive(Debug)]
 struct ParserState<'a> {
-    character_index: usize,
+    original_input: &'a str,
     remaining_input: &'a str,
 }
 
@@ -225,9 +225,13 @@ fn parse_binop_rhs(
 }
 
 fn make_parse_error_with_msg(parser_state: &ParserState, msg: &str) -> ParseError {
+    let error_character_index =
+        parser_state.original_input.len() - parser_state.remaining_input.len();
+    let number_of_squiggles = error_character_index;
+    let squiggle_string = "~".repeat(number_of_squiggles);
+    let context = format!("\t{}\n\t{}^", parser_state.original_input, squiggle_string);
     ParseError {
-        character_index: parser_state.character_index,
-        context: String::from(parser_state.remaining_input),
+        context: String::from(context),
         message: String::from(msg),
     }
 }
@@ -257,7 +261,10 @@ fn parse_primary(parser_state: &mut ParserState) -> Result<Expr, ParseError> {
 
     let maybe_next_character = parser_state.next_character();
     if maybe_next_character.is_none() {
-        return Err(make_parse_error(parser_state));
+        return Err(make_parse_error_with_msg(
+            parser_state,
+            "Expected primary expression",
+        ));
     }
     let next_character = maybe_next_character.unwrap();
 
@@ -316,12 +323,19 @@ fn main() {
         .replace(" ", "");
 
     let mut parser_state = ParserState {
+        original_input: &e_string,
         remaining_input: &e_string,
-        character_index: 0,
     };
     let expr_result = parse_expr(&mut parser_state);
     match expr_result {
-        Err(e) => println!("{:?}", e),
+        Err(e) => {
+            let mut terminal = term::stdout().unwrap();
+            terminal.fg(term::color::RED).unwrap();
+            terminal.attr(term::Attr::Bold).unwrap();
+            println!("Parsing failed.");
+            println!("{}", e);
+            let _ = terminal.reset();
+        }
         Ok(expr) => {
             println!("{}", &expr);
             println!("\n{}", eval(&expr))
